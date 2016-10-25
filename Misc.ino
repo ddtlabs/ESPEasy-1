@@ -466,6 +466,8 @@ void fileSystemCheck()
           f.write(0);
         f.close();
       }
+      f = SPIFFS.open("rules.txt", "w");
+      f.close();
     }
   }
   else
@@ -794,6 +796,7 @@ void SaveToFlash(int index, byte* memAddress, int datasize)
   delete [] data;
   String log = F("FLASH: Settings saved");
   addLog(LOG_LEVEL_INFO, log);
+  flashWrites++;
 }
 
 
@@ -930,6 +933,8 @@ void ResetFactory(void)
       f.write(0);
     f.close();
   }
+  f = SPIFFS.open("rules.txt", "w");
+  f.close();
 #else
   EraseFlash();
   ZeroFillFlash();
@@ -971,6 +976,7 @@ void ResetFactory(void)
   Settings.MessageDelay = 1000;
   Settings.deepSleep = false;
   Settings.CustomCSS = false;
+  Settings.InitSPI = false;
   for (byte x = 0; x < TASKS_MAX; x++)
   {
     Settings.TaskDevicePin1[x] = -1;
@@ -1343,7 +1349,7 @@ float globalstack[STACK_SIZE];
 float *sp = globalstack - 1;
 float *sp_max = &globalstack[STACK_SIZE - 1];
 
-#define is_operator(c)  (c == '+' || c == '-' || c == '*' || c == '/' )
+#define is_operator(c)  (c == '+' || c == '-' || c == '*' || c == '/' || c == '^')
 
 int push(float value)
 {
@@ -1374,6 +1380,9 @@ float apply_operator(char op, float first, float second)
       return first * second;
     case '/':
       return first / second;
+    case '^':
+      return pow(first, second);
+    default:
       return 0;
   }
 }
@@ -1414,6 +1423,8 @@ int op_preced(const char c)
 {
   switch (c)
   {
+    case '^':
+      return 3;
     case '*':
     case '/':
       return 2;
@@ -1428,6 +1439,7 @@ bool op_left_assoc(const char c)
 {
   switch (c)
   {
+    case '^':
     case '*':
     case '/':
     case '+':
@@ -1442,6 +1454,7 @@ unsigned int op_arg_count(const char c)
 {
   switch (c)
   {
+    case '^':
     case '*':
     case '/':
     case '+':
@@ -1834,11 +1847,26 @@ void rulesProcessing(String& event)
   if (data == NULL)
   {
     data = new uint8_t[RULES_MAX_SIZE];
+#if FEATURE_SPIFFS
+    File f = SPIFFS.open("rules.txt", "r+");
+    if (f)
+    {
+      byte *pointerToByteToRead = data;
+      for (int x = 0; x < f.size(); x++)
+      {
+        *pointerToByteToRead = f.read();
+        pointerToByteToRead++;// next byte
+      }
+      data[f.size()] = 0;
+      f.close();
+    }
+#else
     uint32_t _sector = ((uint32_t)&_SPIFFS_start - 0x40200000) / SPI_FLASH_SEC_SIZE;
     _sector += 10;
     noInterrupts();
     spi_flash_read(_sector * SPI_FLASH_SEC_SIZE, reinterpret_cast<uint32_t*>(data), RULES_MAX_SIZE);
     interrupts();
+#endif
     data[RULES_MAX_SIZE - 1] = 0; // make sure it's terminated!
   }
 
@@ -1941,6 +1969,12 @@ void rulesProcessing(String& event)
           // process the action if it's a command and unconditional, or conditional and the condition matches the if or else block.
           if (isCommand && ((!conditional) || (conditional && (condition == ifBranche))))
           {
+            int equalsPos = event.indexOf("=");
+            if (equalsPos > 0)
+            {
+              String tmpString = event.substring(equalsPos+1);
+              action.replace("%eventvalue%",tmpString); // substitute %eventvalue% in actions with the actual value from the event
+            }
             log = F("ACT  : ");
             log += action;
             addLog(LOG_LEVEL_INFO, log);
@@ -1977,6 +2011,15 @@ boolean ruleMatch(String& event, String& rule)
   boolean match = false;
   String tmpEvent = event;
   String tmpRule = rule;
+
+  // Special handling of literal string events, they should start with '!'
+  if (event.charAt(0) == '!')
+  {
+    if (event.equalsIgnoreCase(rule))
+        return true;
+    else
+        return false;
+  }
 
   if (event.startsWith("Clock#Time")) // clock events need different handling...
   {

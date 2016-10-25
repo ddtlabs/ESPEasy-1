@@ -3,8 +3,7 @@
 //#######################################################################################################
 
 /*******************************************************************************
- * Modified version of "Domoticz HTTP CPLUGIN"
- * Copyright 2016 dev0 (https://forum.fhem.de/index.php?action=profile;u=7465)
+ * Copyright 2016 dev0 (https://github.com/ddtlabs)
  * Release notes:
  - v1.0
  - changed switch and dimmer setreading cmds
@@ -16,6 +15,9 @@
  - ArduinoJson Library v5.6.4 required (as used by stable R120)
  - parse for HTTP errors 400, 401
  - moved on/off translation for SENSOR_TYPE_SWITCH/DIMMER to FHEM module
+ - v1.03
+ - changed http request to POST to be rfc compliant
+ - changed log string for http error 400 to 'Bad Request'
  /******************************************************************************/
 
 #define CPLUGIN_009
@@ -58,7 +60,7 @@ boolean CPlugin_009(byte function, struct EventStruct *event, String& string)
         DynamicJsonBuffer jsonBuffer;
         JsonObject& root = jsonBuffer.createObject();
         root["module"] = "ESPEasy";
-        root["version"] = "1.02";
+        root["version"] = "1.03";
 
         // Create nested objects
         JsonObject& data = root.createNestedObject("data");
@@ -164,7 +166,7 @@ boolean FHEMHTTPsend(String url, char* buffer)
 
   // This will send the request to the server
   int len = strlen(buffer);
-  client.print(String("GET ") + url + " HTTP/1.1\r\n" +
+  client.print(String("POST ") + url + " HTTP/1.1\r\n" +
               "Content-Length: "+ len + "\r\n" +
               "Host: " + host + "\r\n" + authHeader +
               "Connection: close\r\n\r\n"
@@ -185,7 +187,7 @@ boolean FHEMHTTPsend(String url, char* buffer)
       success = true;
     }
     else if (line.substring(0, 24) == "HTTP/1.1 400 Bad Request") {
-      strcpy_P(log, PSTR("HTTP : Unauthorized"));
+      strcpy_P(log, PSTR("HTTP : Bad Request"));
     }
     else if (line.substring(0, 25) == "HTTP/1.1 401 Unauthorized") {
       strcpy_P(log, PSTR("HTTP : Unauthorized"));
